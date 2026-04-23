@@ -1,0 +1,3 @@
+group,pair,rho,p_value,n
+human,mean_sentiment~like_to_view_ratio,0.4429065196383081,1.9338456723443423e-18,354
+ai,mean_sentiment~like_to_view_ratio,0.1420405158161251,0.018013514498131624,277

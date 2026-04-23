@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+.venv/
+*.log
+data/raw/*.json
+data/processed/*.csv
+outputs/figures/*.png
+outputs/figures/*.pdf
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!outputs/figures/.gitkeep
