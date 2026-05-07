@@ -1,14 +1,3 @@
-"""
-Data acquisition module (Owner: Tiago).
-
-Thin wrapper around the YouTube Data API v3 (`googleapiclient.discovery`) used
-to pull video metadata and comment threads for the channels defined in
-``config.py``. Raw API payloads are persisted to ``data/raw/`` so that the
-rest of the pipeline can run offline; the public entry point
-``build_dataset()`` returns a tidy merged DataFrame and writes it to
-``data/processed/master_dataset.csv``.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -42,10 +31,7 @@ from config import (
 logger = logging.getLogger(__name__)
 random.seed(RANDOM_SEED)
 
-
-# ---------------------------------------------------------------------------
 # Client / retry helpers
-# ---------------------------------------------------------------------------
 def _build_client():
     """Instantiate a YouTube Data API v3 client using the configured key."""
     return build("youtube", "v3", developerKey=require_api_key(), cache_discovery=False)
@@ -90,10 +76,7 @@ def _dump_raw(payload: Any, name: str) -> Path:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
     return path
 
-
-# ---------------------------------------------------------------------------
 # ISO 8601 duration parsing (avoids adding a dependency on isodate)
-# ---------------------------------------------------------------------------
 _DURATION_RE = re.compile(
     r"^P(?:(?P<days>\d+)D)?T?(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?$"
 )
@@ -210,10 +193,7 @@ def get_channel_videos(channel_id: str, max_results: int = MAX_RESULTS_PER_CHANN
     logger.info("Channel %s: %d videos from %d.", channel_id, len(df), TARGET_YEAR)
     return df
 
-
-# ---------------------------------------------------------------------------
 # Comments
-# ---------------------------------------------------------------------------
 def get_video_comments(video_id: str, max_comments: int = MAX_COMMENTS_PER_VIDEO) -> pd.DataFrame:
     """
     Fetch up to ``max_comments`` top-level comments for ``video_id``.
@@ -265,10 +245,7 @@ def get_video_comments(video_id: str, max_comments: int = MAX_COMMENTS_PER_VIDEO
 
     return pd.DataFrame(rows)
 
-
-# ---------------------------------------------------------------------------
 # Orchestration
-# ---------------------------------------------------------------------------
 def build_dataset() -> pd.DataFrame:
     """
     Iterate every channel in ``config`` and assemble the master DataFrame.
