@@ -1,0 +1,14 @@
+'''
+This module serves as a data acquisition 
+engine that interfaces with the YouTube Data API v3. It automates the 
+extraction of video metadata and comment threads for specific channels, 
+applying an exponential backoff strategy to handle rate limits and quota 
+restrictions gracefully. To ensure reproducibility and support offline analysis, 
+the module persists all raw API responses as JSON files in data/raw/ before processing them.
+
+The primary entry point, build_dataset(), orchestrates the full pipeline: it filters for videos 
+published in a target year, parses complex ISO 8601 durations into seconds, and joins comment-level 
+data with video attributes like narration type (AI vs. Human) and genre. The final output is a "tidy" 
+master dataset saved to data/processed/master_dataset.csv, providing a clean, flat structure ready for 
+immediate downstream analytics and machine learning.
+'''
