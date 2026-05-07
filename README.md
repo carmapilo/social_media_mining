@@ -76,3 +76,7 @@ stdout for debugging.
 - The first run of `--sentiment` downloads the
   `sentence-transformers/all-MiniLM-L6-v2` model (~90 MB) and the NLTK
   `vader_lexicon`.
+- The sentiment stage now also trains TF-IDF classifiers (`LogisticRegression`,
+  `RandomForest`, and `XGBoost` when installed) on weak VADER labels and writes
+  model metrics to `outputs/sentiment_model_comparison.csv` plus important terms
+  to `outputs/sentiment_top_terms.csv`.

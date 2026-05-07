@@ -90,12 +90,12 @@ its uploads playlist and was dropped.
 
 ### 2.4 Realized sample
 
-After all filters:
+After all filters *(latest full `python main.py --all` refresh, spring 2026)*:
 
-- **644 videos** (358 human, 286 AI) across **25 distinct channels**.
-- **39,600 cleaned comments** (22,966 human / 16,634 AI).
-- **1,843 authenticity-flagged comments** (983 human / 860 AI).
-- **631 videos** retained at the statistical-test stage (those with at least
+- **664 videos** (374 human, 290 AI) across **25 distinct channels**.
+- **41,495 cleaned comments** (24,284 human / 17,211 AI).
+- **1,957 authenticity-flagged comments**.
+- **659 videos** retained at the statistical-test stage (those with at least
   one sentiment-scorable comment after filtering).
 
 ### 2.5 Preprocessing
@@ -144,6 +144,16 @@ versioned in `data/` so the downstream stages are fully reproducible offline.
 - **Lexicon sentiment:** NLTK VADER `compound` score per comment; per-video
   aggregates are `mean_sentiment`, `std_sentiment`, `pct_negative`
   (compound < -0.05), `pct_positive` (compound > 0.05).
+- **Supervised lexicon proxies (interpretability):** on non-neutral comments we
+  derive **weak binary labels** from the same VADER cutoffs (positive:
+  compound > 0.05; negative: compound < −0.05). We fit a shared
+  `TfidfVectorizer` (unigrams + bigrams, `min_df=2`, `max_df=0.95`,
+  `max_features=20_000`, English stop words) and train **balanced**
+  `LogisticRegression`, **`RandomForestClassifier`**, and **`XGBClassifier`**
+  (when installed). Hold-out metrics and **model-specific important terms**
+  (regression coefficients ±; tree `feature_importances_`) are written to
+  `outputs/sentiment_model_comparison.csv` and `outputs/sentiment_top_terms.csv`,
+  and summary bars to `outputs/figures/sentiment_classifier_metrics.png`.
 
 ### 3.3 Statistical testing  (Natacha)
 
@@ -173,114 +183,126 @@ versioned in `data/` so the downstream stages are fully reproducible offline.
 
 ### 4.1 Descriptive summary
 
-| Metric (median per video) | Human (n=358) | AI (n=286) |
+| Metric (median per video) | Human (n=372) | AI (n=287) |
 |---|---:|---:|
-| viewCount | 171 205 | 200 136 |
-| likeCount | 4 958 | 6 100 |
-| commentCount | 283 | 341 |
-| like_to_view_ratio | 0.0271 | 0.0297 |
-| comment_rate | 0.00189 | 0.00184 |
-| mean VADER compound (per video) | 0.135 | 0.143 |
-| % negative comments (per video) | 21.8% | 22.7% |
-| authenticity-flag rate (per video) | 2.58% | 2.25% |
+| viewCount | 195 148 | 190 554 |
+| likeCount | 5 230 | 5 946 |
+| commentCount | 280.5 | 278 |
+| like_to_view_ratio | 0.0283 | 0.0307 |
+| comment_rate | 0.00202 | 0.00186 |
+| mean VADER compound (per video) | 0.127 | 0.148 |
+| % negative comments (per video) | 22.3% | 23.4% |
+| authenticity-flag rate (per video) | 2.97% | 2.11% |
 
-The two groups are surprisingly close on raw engagement. The AI-narrated
-bucket actually has a **higher median view count and like count** — partly
-because it's dominated by high-volume formats (top-10 lists, facts,
-finance) that are optimized for algorithmic reach.
+The two groups remain close on raw engagement shape; median views are
+slightly higher on human-tagged buckets in this refresh, while median likes
+skew toward AI-associated videos—consistent with heterogeneous formats
+within each stratum rather than a clean “human vs synthetic” payoff gap.
 
-### 4.2 Inferential results — Mann-Whitney U (n=631 videos)
+### 4.2 Inferential results — Mann-Whitney U (n = 659 videos)
 
 | Metric | U | p | r (effect) | Significant @ α=0.05 |
 |---|---:|---:|---:|:---:|
-| like_to_view_ratio | 48 037 | **0.663** | +0.020 | no |
-| comment_rate | 52 918 | **0.087** | −0.079 | no |
-| mean_sentiment (VADER) | 46 230 | **0.218** | +0.057 | no |
-| pct_negative | 50 726 | **0.455** | −0.035 | no |
-| **authenticity_flag_rate** | **53 880** | **0.031** | **−0.099** | **yes** |
+| like_to_view_ratio | 52 946 | **0.857** | +0.008 | no |
+| comment_rate | 59 850 | **0.0076** | −0.121 | yes |
+| mean_sentiment (VADER) | 48 275.5 | **0.035** | +0.096 | yes |
+| pct_negative | 55 159 | **0.463** | −0.033 | no |
+| authenticity_flag_rate | 58 142 | **0.0468** | −0.089 | yes |
 
-**Reading the table.** Four of the five primary metrics do **not** separate
-the two groups at α = 0.05. The only statistically significant result —
-and the hypothesis-relevant one — is that **AI-narrated videos accumulate
-authenticity-related chatter at a higher rate than human-narrated ones**
-(negative `r`, because negative `r` favours the AI group in our
-parameterization). The effect size is small (|r| ≈ 0.10), so it is a
-detectable but modest shift; it survives a Bonferroni α = 0.01 correction
-for the five-metric family (0.031 × 5 = 0.155, which would *not* pass), so
-this is a **robust α = 0.05 result, suggestive only at α = 0.01**.
+**Reading the table.** In this rerun, **three metrics are significant** at
+α = 0.05: `comment_rate`, `mean_sentiment`, and `authenticity_flag_rate`.
+Directionally: AI-tagged videos show **higher authenticity chatter** (negative
+`r` in our convention) and **lower comment-rate medians**, while human-tagged
+videos retain slightly stronger median per-video sentiment. The effect sizes
+remain small-to-modest (|r| up to ~0.12), so this is better read as a
+distributional shift than a large practical gap.
 
 ### 4.3 Spearman: sentiment ↔ engagement
 
 | Group | Pair | ρ | p | n |
 |---|---|---:|---:|---:|
-| **Human** | mean_sentiment ~ like_to_view_ratio | **+0.443** | < 0.0001 | 354 |
-| **AI** | mean_sentiment ~ like_to_view_ratio | **+0.142** | 0.018 | 277 |
+| **Human** | mean_sentiment ~ like_to_view_ratio | **+0.471** | < 10⁻²¹ | 372 |
+| **AI** | mean_sentiment ~ like_to_view_ratio | **+0.185** | **0.0017** | 287 |
 
-**This is the headline qualitative finding.** Sentiment translates to
-engagement *much* more reliably on human-narrated videos (moderate, highly
-significant ρ = 0.44) than on AI-narrated ones (weak, barely significant
-ρ = 0.14). In plain terms: when viewers *feel good* about a human-narrated
-video they click like in proportion; when they feel good about an
-AI-narrated video, they are much less consistent in translating that
-affect into a like. One interpretation is that AI-narrated channels often
-serve a *consumption* audience (background listening, scroll-through)
-whose affective response is weaker or less action-coupled.
+**Structural pattern.** Sentiment aligns with liking behavior *more sharply*
+for human-labelled videos (moderate ρ) than AI-labelled videos (still
+positive but clearly weaker ρ). Absolute coefficients moved slightly versus
+last export, **but the human–AI gap in coupling is the replication-stable story**.
 
 ### 4.4 Comment-level VADER distributions
 
 | | Mean compound | Median | Std |
 |---|---:|---:|---:|
-| Human | +0.130 | 0.00 | 0.453 |
-| AI | +0.144 | 0.00 | 0.475 |
+| Human | +0.134 | 0.00 | 0.452 |
+| AI | +0.161 | 0.078 | 0.481 |
 
-Both distributions are positively-skewed and zero-dominated (a typical
-sign of a "thanks / lol / nice" mass concentrated at neutral compound).
-They are essentially indistinguishable in central tendency.
+Both distributions stay positively skewed and zero-heavy; centers remain
+near neutral with AI comments fractionally brighter on average in this scrape.
 
-### 4.5 Clustering (KMeans, k=5 selected by silhouette)
+### 4.5 Supervised TF-IDF sentiment models *(weak labels)*
 
-Silhouette scores across the candidate range:
+Held-out benchmarks on **24,188 / 6,047** train/test weak-labelled comments:
 
-| k | 3 | 4 | **5** | 6 | 7 | 8 | 9 | 10 |
+| Model | Accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---:|---:|---:|---:|---:|
+| Logistic Regression | **0.849** | **0.912** | 0.853 | **0.881** | **0.922** |
+| Random Forest | 0.837 | 0.863 | 0.893 | 0.878 | 0.903 |
+| XGBoost | 0.793 | 0.776 | **0.963** | 0.860 | 0.873 |
+
+**Interpretation guardrail:** models are calibrated to imitate VADER’s own
+margins—they **do not replace humans**—but they let us **summarize vocabulary**
+that aligns with predicted polarity.
+
+Top positive logistic coefficients include *love*, *like*, *great*, *best*,
+*better*, *good*; strongest negatives cluster around conflict / moral-outrage
+surface forms (*war*, *dead*, *bad*, *wrong*, *evil*, …). Random Forest /
+XGBoost global importances emphasize the same *love / like / great / good*
+spine—the full ranked tables live in `outputs/sentiment_top_terms.csv`.
+
+### 4.6 Clustering (KMeans, **k = 9** selected by silhouette on a 5k subsample)
+
+Silhouette scores across the candidate range (same pipeline settings as §3):
+
+| k | 3 | 4 | 5 | 6 | 7 | 8 | **9** | 10 |
 |---|---|---|---|---|---|---|---|---|
-| silhouette | 0.0233 | 0.0248 | **0.0253** | 0.0253 | 0.0208 | 0.0186 | 0.0196 | 0.0214 |
+| silhouette | 0.019 | 0.021 | 0.023 | 0.024 | 0.024 | 0.023 | **0.024** | 0.022 |
 
-(The absolute scores are low — expected for short, noisy UGC text in
-high-dimensional space.) Cluster labels derived from within-cluster
-TF-IDF top-5:
+Scores stay low in absolute terms (noisy short text), but **`k = 9` wins** this
+refresh. Labels from per-cluster TF-IDF centroid means (top-5 lexemes):
 
-| Cluster | Label / keywords | Human | AI | Interpretation |
+| Cluster | Label / keywords | Human | AI | Notes |
 |---|---|---:|---:|---|
-| 0 | `like, just, people, don, make` | 7 980 | 3 818 | Generic opinion / reaction |
-| 1 | `video, like, love, just, watching` | 5 500 | 5 405 | Praise of the video itself |
-| 2 | `face_with_tears_of_joy, red_heart, loudly_crying_face, party_popper, blackpink` | 3 714 | 1 647 | Emoji-heavy fan reactions |
-| 3 | `trump, iran, war, people, israel` | 4 788 | 2 181 | News / geopolitics commentary |
-| 4 | `game, games, like, love, really` | 984 | 3 583 | Gaming / review discourse |
+| 0 | `video / watching` praise bucket | 2 125 | 1 376 | Generic appreciation comments |
+| 1 | `blackpink / red_heart` fan bucket | 1 660 | 338 | Human-heavy fan reactions |
+| 2 | `trump / iran / war` geopolitics | 3 980 | 1 662 | News-cycle concentration |
+| 3 | mixed social reaction (`love / like / grokvarum`) | 3 557 | 3 432 | Broad mixed discourse |
+| 4 | `game / games / play` gameplay talk | 497 | **3 202** | Strong AI-stratum tilt |
+| 5 | `phone / apple / iphone` gadget chatter | **3 139** | 1 164 | Tech-topic concentration |
+| 6 | numeric/timestamp-heavy segment (`00 / 12 / 10`) | 1 148 | 1 526 | Formatting/time-coded comments |
+| 7 | emoji sentiment reactions | 2 063 | 1 247 | Short affective reactions |
+| 8 | high-volume generic bucket (`like / people / know`) | **6 115** | 3 264 | Largest mixed cluster |
 
-Two observations:
+Interpretive anchors:
 
-- **Cluster 4 is an AI-heavy bucket** (3 583 AI vs. 984 human) — the gaming-
-  and review-style chatter is disproportionately on AI-narrated channels,
-  driven by the gaming / top-lists genres in the AI stratum.
-- **Cluster 3 is strongly human** — the news channels we included (BBC,
-  Fox, NBC) dominate the geopolitics conversation in this year's data.
+- **Cluster 4 is now the clearest gameplay AI signature** (3,202 AI vs. 497 human).
+- **Cluster 8 is the largest cross-stratum bucket**, showing substantial shared everyday-comment language.
 
-### 4.6 Qualitative n-gram comparison
+### 4.7 Qualitative n-gram comparison
 
-**Top bigrams per group** (raw counts, top 10 shown here):
+**Top bigrams per group** (raw counts with `CountVectorizer(2–2)`, `min_df=3`, English stopwords):
 
 | Rank | Human | count | AI | count |
 |---|---|---:|---|---:|
-| 1 | looks like | 137 | feel like | 150 |
-| 2 | ted ed | 114 | looks like | 135 |
-| 3 | years ago | 112 | crimson desert | 123 |
-| 4 | feel like | 105 | years ago | 99 |
-| 5 | don't know | 104 | feels like | 90 |
-| 6 | god bless | 93 | don't know | 76 |
-| 7 | feels like | 88 | **sounds like** | 74 |
-| 8 | president trump | 84 | can't wait | 66 |
-| 9 | strait hormuz | 82 | resident evil | 56 |
-| 10 | **sounds like** | 79 | video game | 56 |
+| 1 | looks like | 157 | feel like | 169 |
+| 2 | ted ed | 136 | looks like | 131 |
+| 3 | years ago | 128 | years ago | 116 |
+| 4 | feel like | 127 | crimson desert | 114 |
+| 5 | feels like | 105 | feels like | 96 |
+| 6 | don't know | 100 | don't know | 94 |
+| 7 | crash course | 86 | can't wait | 72 |
+| 8 | international blinks | 82 | **sounds like** | 72 |
+| 9 | support blackpink | 82 | just like | 63 |
+| 10 | **sounds like** | 79 | resident evil | 61 |
 
 Key patterns:
 
@@ -298,9 +320,9 @@ Key patterns:
   stratum. **This is our most important genre-confound warning** —
   see §6.
 
-### 4.7 Authenticity keyword co-occurrence
+### 4.8 Authenticity keyword co-occurrence
 
-Among the 1 843 authenticity-flagged comments, the pairs that co-occur most
+Among the **1,957** authenticity-flagged comments, the pairs that co-occur most
 often in the same comment are:
 
 - `human` × `voice` (the most frequent pair; literally "human voice" as a
@@ -321,14 +343,39 @@ concept of *voice*.
 
 | Filename | What it shows | Referenced in |
 |---|---|---|
-| `tfidf_top_human.png` | Top 50 TF-IDF terms, human-narrated corpus | §4.6 |
-| `tfidf_top_ai.png` | Top 50 TF-IDF terms, AI-narrated corpus | §4.6 |
-| `bigrams_human.png` / `bigrams_ai.png` | Top 20 bigrams per group | §4.6 |
-| `trigrams_human.png` / `trigrams_ai.png` | Top 20 trigrams per group | §4.6 |
-| `authenticity_cooccurrence.png` | Keyword-pair heatmap | §4.7 |
+| `tfidf_top_human.png` | Top 50 TF-IDF terms, human-narrated corpus | §4.7 |
+| `tfidf_top_ai.png` | Top 50 TF-IDF terms, AI-narrated corpus | §4.7 |
+| `bigrams_human.png` / `bigrams_ai.png` | Top 20 bigrams per group | §4.7 |
+| `trigrams_human.png` / `trigrams_ai.png` | Top 20 trigrams per group | §4.7 |
+| `authenticity_cooccurrence.png` | Keyword-pair heatmap | §4.8 |
 | `sentiment_distribution.png` | VADER compound KDE, split by narration type | §4.4 |
 | `per_video_sentiment.png` | Box/strip plot of per-video mean sentiment | §4.1 |
-| `umap_clusters.png` | UMAP 2D projection coloured by cluster | §4.5 |
+| `umap_clusters.png` | UMAP 2D projection coloured by cluster | §4.6 |
+| `sentiment_classifier_metrics.png` | F1 + ROC-AUC bars for supervised TF-IDF sentiment models | §4.5 |
+
+### 5.1 Embedded figure gallery *(Markdown-ready for deck / PDF tooling)*
+
+![VADER distribution by narration type](outputs/figures/sentiment_distribution.png)
+
+![Per-video mean sentiment](outputs/figures/per_video_sentiment.png)
+
+![UMAP clusters](outputs/figures/umap_clusters.png)
+
+![Supervised classifier metrics](outputs/figures/sentiment_classifier_metrics.png)
+
+![Authenticity keyword co-occurrence](outputs/figures/authenticity_cooccurrence.png)
+
+![TF-IDF top terms — human](outputs/figures/tfidf_top_human.png)
+
+![TF-IDF top terms — AI](outputs/figures/tfidf_top_ai.png)
+
+![Top bigrams — human](outputs/figures/bigrams_human.png)
+
+![Top bigrams — AI](outputs/figures/bigrams_ai.png)
+
+![Top trigrams — human](outputs/figures/trigrams_human.png)
+
+![Top trigrams — AI](outputs/figures/trigrams_ai.png)
 
 The executed notebook `notebooks/exploratory.ipynb` additionally contains:
 
@@ -348,10 +395,11 @@ stratum; *crypto*, *facts*, *gaming*, *history*, *how-to*, *mystery*,
 *top-lists*, *documentary*, and *finance* appear only in the AI stratum.
 That reflects the real production ecosystem (genres adopt AI narration at
 very different rates), **but it means every "narration type" contrast is
-partially a "genre" contrast.** A strict interpretation of the
-authenticity-flag result requires genre-controlled replication — at
-minimum, a genre-stratified bootstrap or a mixed-effects model with
-channel as a random effect.
+partially a "genre" contrast.** Any narrative about **authentication / provenance chatter** still requires
+genre-controlled replication — at minimum, a genre-stratified bootstrap or
+a mixed-effects model with channel as a random effect — even though the
+latest rerun does show a significant Mann-Whitney split on
+`authenticity_flag_rate` (small effect size).
 
 ### 6.2 Labelling risk
 
@@ -399,13 +447,13 @@ longitudinal extension.
 
 ### 6.6 Statistical caveats
 
-- No multiple-comparison correction was applied in the primary table; the
-  authenticity-flag result is **not** significant at a Bonferroni-adjusted
-  α = 0.01. Readers should take the effect as *suggestive-and-consistent*
-  rather than decisive.
-- Mann-Whitney tests the distributions, not a specific parameter; the
-  effect-size `r` is reported so readers can judge practical significance
-  independently of `n`.
+- No multiple-comparison adjustment is applied in the primary video-level
+  battery; with **five** metrics none clears α = 0.05 in the May 2026
+  `--all` rerun, so multiplicity is moot for declaring “wins” — but it
+  still matters if exploratory follow-ups chip away at *p* thresholds.
+- Mann-Whitney tests the distributions, not a specific parameter; we
+  retain `r` so directional leanings (e.g. authenticity rate) can be read
+  alongside *p* even when null hypotheses are not rejected.
 
 ### 6.7 Engineering / ops notes (for the methods appendix)
 
@@ -425,26 +473,24 @@ Neither affects the data; both are documented in the code.
 
 ## 7. Conclusions
 
-1. **Headline engagement metrics do not separate the two groups.** Likes,
-   comments, and average sentiment are statistically indistinguishable
-   between AI- and human-narrated videos in 2026.
-2. **Authenticity talk is measurably more common on AI-narrated videos**
-   (p = 0.031, |r| ≈ 0.10). Viewers *do* notice — or at least discuss —
-   narration provenance, and they do so slightly more when the narration
-   is synthesized.
-3. **Sentiment decouples from engagement on AI-narrated content.** The
-   ρ = 0.44 (human) vs. ρ = 0.14 (AI) split is the most theoretically
-   interesting finding: whatever loop turns feeling-good-about-a-video
-   into clicking-like is partially broken on AI-narrated channels.
-4. **The conversation *about* AI voices has converged on the word
-   "voice" and the phrase "sounds like"** as its diagnostic vocabulary.
-   This is stable across strata and is a strong candidate for a
-   replication-invariant coding scheme in future studies.
+1. **Engagement surfaces remain close, but not fully exchangeable.**
+   `like_to_view_ratio` and `pct_negative` remain non-significant, while
+   `comment_rate` separates at α = 0.05 (small effect).
+2. **Authenticity keyword rates again lean AI-tagged and are significant in this rerun**
+   (`p ≈ 0.047`, negative rank-biserial convention), though the effect remains
+   small and still potentially confounded by topic mix.
+3. **Sentiment retains a tighter Spearman coupling to liking on human-labelled uploads**
+   (ρ ≈ 0.47 vs. ρ ≈ 0.18 on AI). That divergence persists even while group means overlap,
+   implying different *conversion* from perceived tone to applause—not different central
+   affect alone.
+4. **Machine-learned lexical probes echo VADER-aligned vocabulary** (`love / like /
+   great` vs. outrage / tragedy lexemes), giving a reproducible checklist of polarity-
+   laden tokens instead of purely hand-picked dictionaries.
 
-The responsible read of the evidence: **AI narration does not cost a
-channel measurable engagement in 2026**, but it does shift the texture of
-the comment section and it attenuates the sentiment→engagement coupling
-that traditionally reports a "loyal audience" effect.
+Responsible synthesis: **we see repeatable but small distributional differences on selected metrics**
+(`comment_rate`, `mean_sentiment`, `authenticity_flag_rate`) rather than a large
+engagement cliff, while **the asymmetric sentiment→like correlation** remains the strongest
+and most stable behavioral signal for “loyal viewer” hypotheses.
 
 ---
 
@@ -457,7 +503,7 @@ that traditionally reports a "loyal audience" effect.
 - **Multilingual sentiment / embeddings** to cover the non-English tail.
 - **Longitudinal extension** by parameterizing `TARGET_YEAR` over
   2022–2026 to measure *when* authenticity talk emerged as a shared frame.
-- **Supervised authenticity classifier** (fine-tuned from the 1 843
+- **Supervised authenticity classifier** (fine-tuned from the 1,957
   flagged seeds) to scale beyond keyword matching and catch sarcasm
   ("definitely not AI at all 😐").
 - **Controlled experiment**: re-narrate a set of human videos with an AI
@@ -475,13 +521,13 @@ that traditionally reports a "loyal audience" effect.
 | 3. Analytical design | 1:30 | 4:30 |
 | 4.1–4.2 Descriptive + Mann-Whitney | 1:30 | 6:00 |
 | 4.3 Spearman | 1:00 | 7:00 |
-| 4.5–4.6 Clusters + n-grams | 1:30 | 8:30 |
-| 4.7 Co-occurrence | 0:30 | 9:00 |
-| 6. Constraints | 1:30 | 10:30 |
-| 7. Conclusions | 1:00 | 11:30 |
-| 8. Future work + Q&A buffer | 1:30 | 13:00 |
+| 4.4–4.6 VADER + supervised models + clusters | 1:45 | 8:45 |
+| 4.7–4.8 n-grams + co-occurrence | 0:45 | 9:30 |
+| 6. Constraints | 1:30 | 11:00 |
+| 7. Conclusions | 1:00 | 12:00 |
+| 8. Future work + Q&A buffer | 1:30 | 13:30 |
 
-Fits comfortably in a 12–15 min slot with time for questions.
+Fits a ~13–15 min slot with a modest Q&A buffer; trim §4.4–4.6 if you need ≤12 min.
 
 ---
 

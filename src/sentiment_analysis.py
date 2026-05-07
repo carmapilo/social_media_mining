@@ -20,14 +20,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.metrics import silhouette_score
+from sklearn.model_selection import train_test_split
 
 from config import (
     FIGURES_DIR,
     KMEANS_K_DEFAULT,
     KMEANS_K_RANGE,
+    OUTPUTS_DIR,
     PROCESSED_DIR,
     RANDOM_SEED,
     SENTENCE_MODEL,
@@ -88,7 +93,7 @@ def tune_kmeans(
         labels = km.fit_predict(sample)
         try:
             scores[k] = float(silhouette_score(sample, labels))
-        except ValueError:
+        except (ValueError, MemoryError, np.core._exceptions._ArrayMemoryError):
             scores[k] = float("nan")
     best_k = max(scores, key=lambda k: scores[k])
     return best_k, scores
@@ -191,6 +196,212 @@ def _plot_per_video_sentiment(video_df: pd.DataFrame, out_path: Path) -> None:
     plt.close(fig)
 
 
+def _plot_sentiment_classifier_metrics(metrics_df: pd.DataFrame, out_path: Path) -> None:
+    """Bar chart of F1 and ROC-AUC for supervised TF-IDF sentiment classifiers."""
+    df = metrics_df.copy()
+    df["label"] = df["model"].str.replace("_", " ").str.title()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    df_f1 = df.sort_values("f1", ascending=True)
+    sns.barplot(data=df_f1, y="label", x="f1", ax=axes[0], color="#4C72B0")
+    axes[0].set_title("F1 (positive vs negative, weak VADER labels)")
+    axes[0].set_xlabel("F1")
+    axes[0].set_xlim(0, 1.02)
+    axes[0].set_ylabel("")
+    df_auc = df.sort_values("roc_auc", ascending=True)
+    sns.barplot(data=df_auc, y="label", x="roc_auc", ax=axes[1], color="#55A868")
+    axes[1].set_title("ROC-AUC")
+    axes[1].set_xlabel("ROC-AUC")
+    axes[1].set_xlim(0, 1.02)
+    axes[1].set_ylabel("")
+    fig.suptitle("Supervised sentiment models (TF-IDF)", y=1.02, fontsize=12)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Supervised sentiment models (feature importance)
+# ---------------------------------------------------------------------------
+def _build_weak_sentiment_labels(vader_scores: pd.Series) -> pd.Series:
+    """
+    Convert VADER compound scores into weak binary labels.
+
+    Positive: compound > 0.05
+    Negative: compound < -0.05
+    Neutral comments are dropped for supervised training.
+    """
+    labels = pd.Series(index=vader_scores.index, dtype="object")
+    labels.loc[vader_scores > 0.05] = "positive"
+    labels.loc[vader_scores < -0.05] = "negative"
+    return labels
+
+
+def _extract_signed_terms(
+    model_name: str,
+    feature_names: np.ndarray,
+    importances: np.ndarray,
+    top_k: int = 20,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    order_desc = np.argsort(-importances)[:top_k]
+    for rank, idx in enumerate(order_desc, start=1):
+        rows.append(
+            {
+                "model": model_name,
+                "term": str(feature_names[idx]),
+                "score": float(importances[idx]),
+                "direction": "positive",
+                "rank": rank,
+            }
+        )
+    order_asc = np.argsort(importances)[:top_k]
+    for rank, idx in enumerate(order_asc, start=1):
+        rows.append(
+            {
+                "model": model_name,
+                "term": str(feature_names[idx]),
+                "score": float(importances[idx]),
+                "direction": "negative",
+                "rank": rank,
+            }
+        )
+    return rows
+
+
+def _extract_unsigned_terms(
+    model_name: str,
+    feature_names: np.ndarray,
+    importances: np.ndarray,
+    top_k: int = 20,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    order_desc = np.argsort(-importances)[:top_k]
+    for rank, idx in enumerate(order_desc, start=1):
+        rows.append(
+            {
+                "model": model_name,
+                "term": str(feature_names[idx]),
+                "score": float(importances[idx]),
+                "direction": "global",
+                "rank": rank,
+            }
+        )
+    return rows
+
+
+def train_sentiment_models(
+    text_series: pd.Series,
+    vader_scores: pd.Series,
+    *,
+    top_k_terms: int = 20,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Train TF-IDF-based sentiment models and return:
+      1) model-level metrics
+      2) top important terms per model
+    """
+    weak_labels = _build_weak_sentiment_labels(vader_scores)
+    train_df = pd.DataFrame({"text": text_series, "label": weak_labels}).dropna()
+    if train_df.shape[0] < 200:
+        raise ValueError(
+            "Not enough non-neutral comments for supervised sentiment training. "
+            f"Need >=200, got {train_df.shape[0]}."
+        )
+    if train_df["label"].nunique() < 2:
+        raise ValueError("Weak labels produced a single class; cannot train classifiers.")
+
+    y = (train_df["label"] == "positive").astype(int).to_numpy()
+    X_train, X_test, y_train, y_test = train_test_split(
+        train_df["text"],
+        y,
+        test_size=0.2,
+        random_state=RANDOM_SEED,
+        stratify=y,
+    )
+
+    vectorizer = TfidfVectorizer(
+        stop_words="english",
+        ngram_range=(1, 2),
+        min_df=2,
+        max_df=0.95,
+        max_features=20000,
+    )
+    X_train_tfidf = vectorizer.fit_transform(X_train)
+    X_test_tfidf = vectorizer.transform(X_test)
+    feature_names = vectorizer.get_feature_names_out()
+
+    models: dict[str, object] = {
+        "logistic_regression": LogisticRegression(
+            max_iter=1500,
+            random_state=RANDOM_SEED,
+            class_weight="balanced",
+        ),
+        "random_forest": RandomForestClassifier(
+            n_estimators=400,
+            random_state=RANDOM_SEED,
+            n_jobs=-1,
+            class_weight="balanced_subsample",
+        ),
+    }
+
+    try:
+        from xgboost import XGBClassifier
+
+        models["xgboost"] = XGBClassifier(
+            n_estimators=400,
+            max_depth=6,
+            learning_rate=0.05,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            objective="binary:logistic",
+            eval_metric="logloss",
+            random_state=RANDOM_SEED,
+            n_jobs=-1,
+        )
+    except ImportError:
+        logger.warning("xgboost is not installed; skipping XGBoost model.")
+
+    metrics_rows: list[dict[str, float | str]] = []
+    terms_rows: list[dict[str, object]] = []
+
+    for model_name, model in models.items():
+        model.fit(X_train_tfidf, y_train)
+        y_pred = model.predict(X_test_tfidf)
+        if hasattr(model, "predict_proba"):
+            y_prob = model.predict_proba(X_test_tfidf)[:, 1]
+            roc_auc = float(roc_auc_score(y_test, y_prob))
+        else:
+            roc_auc = float("nan")
+
+        metrics_rows.append(
+            {
+                "model": model_name,
+                "n_train": int(X_train_tfidf.shape[0]),
+                "n_test": int(X_test_tfidf.shape[0]),
+                "accuracy": float(accuracy_score(y_test, y_pred)),
+                "precision": float(precision_score(y_test, y_pred, zero_division=0)),
+                "recall": float(recall_score(y_test, y_pred, zero_division=0)),
+                "f1": float(f1_score(y_test, y_pred, zero_division=0)),
+                "roc_auc": roc_auc,
+            }
+        )
+
+        if model_name == "logistic_regression":
+            importances = model.coef_[0]
+            terms_rows.extend(
+                _extract_signed_terms(model_name, feature_names, importances, top_k=top_k_terms)
+            )
+        else:
+            importances = np.asarray(model.feature_importances_)
+            terms_rows.extend(
+                _extract_unsigned_terms(model_name, feature_names, importances, top_k=top_k_terms)
+            )
+
+    metrics_df = pd.DataFrame(metrics_rows).sort_values("f1", ascending=False).reset_index(drop=True)
+    terms_df = pd.DataFrame(terms_rows)
+    return metrics_df, terms_df
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -226,8 +437,16 @@ def run(
     logger.info("Embeddings shape=%s", embeddings.shape)
 
     if tune_k:
-        best_k, scores = tune_kmeans(embeddings)
-        logger.info("KMeans silhouette scores: %s -> best k=%d", scores, best_k)
+        try:
+            best_k, scores = tune_kmeans(embeddings)
+            logger.info("KMeans silhouette scores: %s -> best k=%d", scores, best_k)
+        except (MemoryError, np.core._exceptions._ArrayMemoryError):
+            best_k = KMEANS_K_DEFAULT
+            logger.warning(
+                "KMeans tuning ran out of memory; using default k=%d.",
+                best_k,
+            )
+            print(f"[sentiment] k tuning OOM, fallback to default k={best_k}")
     else:
         best_k = KMEANS_K_DEFAULT
 
@@ -250,6 +469,18 @@ def run(
     # ------------------------------------------------------------------
     df["vader_compound"] = score_vader(texts)
     _plot_sentiment_distribution(df, FIGURES_DIR / "sentiment_distribution.png")
+    try:
+        model_metrics, top_terms = train_sentiment_models(df["text_clean"], df["vader_compound"])
+        model_metrics.to_csv(OUTPUTS_DIR / "sentiment_model_comparison.csv", index=False, encoding="utf-8")
+        top_terms.to_csv(OUTPUTS_DIR / "sentiment_top_terms.csv", index=False, encoding="utf-8")
+        _plot_sentiment_classifier_metrics(
+            model_metrics, FIGURES_DIR / "sentiment_classifier_metrics.png"
+        )
+        print("[sentiment] model comparison:")
+        print(model_metrics.to_string(index=False))
+    except ValueError as exc:
+        logger.warning("Skipping supervised sentiment model training: %s", exc)
+        print(f"[sentiment] skipped supervised model training: {exc}")
 
     # ------------------------------------------------------------------
     # Per-video aggregation + merge
