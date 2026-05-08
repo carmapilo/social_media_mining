@@ -103,6 +103,7 @@ def run(
             continue
         row = {"metric": metric, **mann_whitney(human[metric], ai[metric])}
         row["significant_0.05"] = bool(row["p_value"] < 0.05) if not np.isnan(row["p_value"]) else False
+        row["significant_bonferroni"] = bool(row["p_value"] < (0.05 / len(METRICS))) if not np.isnan(row["p_value"]) else False
         rows.append(row)
 
     stats_df = pd.DataFrame(rows)
@@ -115,6 +116,13 @@ def run(
         r = spearman(grp["mean_sentiment"], grp["like_to_view_ratio"])
         corr_rows.append({"group": grp_name, "pair": "mean_sentiment~like_to_view_ratio", **r})
     corr_df = pd.DataFrame(corr_rows)
+    if "authenticity_flag_rate" in df.columns:
+        mean_flag_rate = df["authenticity_flag_rate"].mean()
+        if mean_flag_rate > 0.30:
+            logger.warning(
+                "Mean authenticity_flag_rate=%.3f is unusually high; verify keyword matching in preprocessing.",
+                mean_flag_rate,
+            )
 
     # ------------------------------------------------------------------
     # Persist + pretty-print
