@@ -3,7 +3,8 @@ Linguistic analysis module (Owner: Carlos).
 
 Computes TF-IDF top terms, top bigrams/trigrams, and a keyword co-occurrence
 matrix for the cleaned comments in ``data/processed/cleaned_dataset.csv``,
-split by ``narration_type``. Figures are written to ``outputs/figures/``.
+split by ``narration_type``. Figures are written to ``outputs/figures/`` and
+tables are exported to ``outputs/``.
 """
 
 from __future__ import annotations
@@ -148,6 +149,9 @@ def run(cleaned_path: Path | str | None = None) -> dict[str, pd.DataFrame]:
     logger.info("Linguistic analysis on shape=%s", df.shape)
     print("[linguistic] input shape:", df.shape)
 
+    outputs_dir = FIGURES_DIR.parent
+    outputs_written: list[Path] = []
+
     results: dict[str, pd.DataFrame] = {}
 
     for group in ("human", "ai"):
@@ -162,6 +166,14 @@ def run(cleaned_path: Path | str | None = None) -> dict[str, pd.DataFrame]:
             f"Top {TOP_TFIDF_TERMS} TF-IDF terms ({group})",
             FIGURES_DIR / f"tfidf_top_{group}.png",
         )
+        tfidf_path = outputs_dir / f"tfidf_top_{group}.csv"
+        tfidf_df.to_csv(tfidf_path, index=False)
+        outputs_written.extend(
+            [
+                FIGURES_DIR / f"tfidf_top_{group}.png",
+                tfidf_path,
+            ]
+        )
         results[f"tfidf_{group}"] = tfidf_df
         print(f"[linguistic] top TF-IDF ({group}):")
         print(tfidf_df.head(15).to_string(index=False))
@@ -170,6 +182,18 @@ def run(cleaned_path: Path | str | None = None) -> dict[str, pd.DataFrame]:
         trigrams = top_ngrams(corpus, (3, 3))
         _plot_ngrams(bigrams, f"Top bigrams ({group})", FIGURES_DIR / f"bigrams_{group}.png")
         _plot_ngrams(trigrams, f"Top trigrams ({group})", FIGURES_DIR / f"trigrams_{group}.png")
+        bigrams_path = outputs_dir / f"bigrams_{group}.csv"
+        trigrams_path = outputs_dir / f"trigrams_{group}.csv"
+        bigrams.to_csv(bigrams_path, index=False)
+        trigrams.to_csv(trigrams_path, index=False)
+        outputs_written.extend(
+            [
+                FIGURES_DIR / f"bigrams_{group}.png",
+                FIGURES_DIR / f"trigrams_{group}.png",
+                bigrams_path,
+                trigrams_path,
+            ]
+        )
         results[f"bigrams_{group}"] = bigrams
         results[f"trigrams_{group}"] = trigrams
 
@@ -179,13 +203,21 @@ def run(cleaned_path: Path | str | None = None) -> dict[str, pd.DataFrame]:
     auth_df = df[df["authenticity_flag"] == True]  # noqa: E712
     if not auth_df.empty:
         cooc = keyword_cooccurrence(auth_df["text_clean"].tolist(), AUTHENTICITY_KEYWORDS)
-        cooc.to_csv(FIGURES_DIR.parent / "authenticity_cooccurrence.csv")
-        _plot_cooccurrence(cooc, FIGURES_DIR / "authenticity_cooccurrence.png")
+        cooc_path = outputs_dir / "authenticity_cooccurrence.csv"
+        cooc_fig_path = FIGURES_DIR / "authenticity_cooccurrence.png"
+        cooc.to_csv(cooc_path)
+        _plot_cooccurrence(cooc, cooc_fig_path)
+        outputs_written.extend([cooc_path, cooc_fig_path])
         results["cooccurrence"] = cooc
         print("[linguistic] authenticity co-occurrence (diag = marginal counts):")
         print(cooc.to_string())
     else:
         logger.info("No authenticity-flagged comments; skipping co-occurrence.")
+
+    if outputs_written:
+        logger.info("Linguistic outputs written:")
+        for path in outputs_written:
+            logger.info("- %s", path)
 
     return results
 

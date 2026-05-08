@@ -63,6 +63,21 @@ python main.py --sentiment
 python main.py --stats
 ```
 
+## Linguistic outputs
+
+The linguistic stage produces the following artifacts:
+
+- `outputs/figures/tfidf_top_human.png` and `outputs/figures/tfidf_top_ai.png`
+- `outputs/tfidf_top_human.csv` and `outputs/tfidf_top_ai.csv`
+- `outputs/figures/bigrams_human.png` and `outputs/figures/bigrams_ai.png`
+- `outputs/bigrams_human.csv` and `outputs/bigrams_ai.csv`
+- `outputs/figures/trigrams_human.png` and `outputs/figures/trigrams_ai.png`
+- `outputs/trigrams_human.csv` and `outputs/trigrams_ai.csv`
+- `outputs/figures/authenticity_cooccurrence.png`
+- `outputs/authenticity_cooccurrence.csv`
+
+The top-term and n-gram tables are also printed to stdout when the stage runs.
+
 Each stage prints the shape of its output DataFrame and a short sample to
 stdout for debugging.
 
